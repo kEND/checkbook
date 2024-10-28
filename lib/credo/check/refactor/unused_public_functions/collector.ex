@@ -1,27 +1,26 @@
 defmodule Credo.Check.Refactor.UnusedPublicFunctions.Collector do
   def collect_unused_functions(source_file, function_calls) do
-    public_functions = MapSet.new(get_public_functions(source_file))
+    # Get public functions with their line numbers
+    public_functions_with_lines = get_public_functions(source_file)
+
+    # Create sets using just the MFA tuples for comparison
+    defined_functions = MapSet.new(public_functions_with_lines, fn {mfa, _line} -> mfa end)
     called_functions = MapSet.new(function_calls)
 
-    MapSet.difference(public_functions, called_functions)
-    |> MapSet.to_list()
+    # Find unused functions
+    unused_mfas = MapSet.difference(defined_functions, called_functions)
+
+    # Return full tuples (with line numbers) for unused functions
+    Enum.filter(public_functions_with_lines, fn {mfa, _line} -> MapSet.member?(unused_mfas, mfa) end)
   end
 
   def get_public_functions(source_file) do
-    ast = Credo.SourceFile.ast(source_file)
-
     {_, {_module_stack, functions}} =
-      ast
-      |> Macro.traverse(
-        # initial acc: {module_stack, functions}
-        {[], []},
-        &pre_traverse/2,
-        &post_traverse/2
-      )
+      source_file
+        |> Credo.SourceFile.ast()
+        |> Macro.traverse({[], []}, &pre_traverse/2, &post_traverse/2)
 
-    functions
-    |> Enum.reverse()
-    |> group_module_functions()
+    Enum.reverse(functions)
   end
 
   # Handle entering a module definition
@@ -31,9 +30,10 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions.Collector do
   end
 
   # Handle public function definitions
-  defp pre_traverse({:def, _meta, [{name, _, args} | _]} = node, {[current_module | _] = stack, fns}) do
+  defp pre_traverse({:def, meta, [{name, _, args} | _]} = node, {[current_module | _] = stack, fns}) do
     arity = if is_list(args), do: length(args), else: 0
-    {node, {stack, [{current_module, name, arity} | fns]}}
+    function_tuple = {{current_module, name, arity}, line: meta[:line]}
+    {node, {stack, [function_tuple | fns]}}
   end
 
   # Skip private functions
@@ -54,10 +54,5 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions.Collector do
   # Default case for post_traverse
   defp post_traverse(_node, acc) do
     {[], acc}
-  end
-
-  # Helper to create final MFA tuples
-  defp group_module_functions(functions) do
-    functions
   end
 end

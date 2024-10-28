@@ -23,7 +23,7 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions.CollectorTest do
         """
         |> to_source_file("lib/module_a.ex")
 
-      assert [{ModuleA, :public_function, 0}] == Collector.get_public_functions(module_a)
+      assert [{{ModuleA, :public_function, 0}, line: 5}] == Collector.get_public_functions(module_a)
     end
 
     test "returns public functions defined in multiple modules in a file" do
@@ -43,7 +43,10 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions.CollectorTest do
         """
         |> to_source_file("lib/module_a.ex")
 
-      assert [{ModuleA, :public_function, 0}, {ModuleB, :public_function, 0}] ==
+      assert [
+               {{ModuleA, :public_function, 0}, line: 2},
+               {{ModuleB, :public_function, 0}, line: 8}
+             ] ==
                Collector.get_public_functions(module_a)
     end
 
@@ -65,7 +68,10 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions.CollectorTest do
         """
         |> to_source_file("lib/module_a.ex")
 
-      assert [{ModuleA.NestedModule, :public_function, 0}, {ModuleA, :another_function, 0}] ==
+      assert [
+               {{ModuleA.NestedModule, :public_function, 0}, line: 3},
+               {{ModuleA, :another_function, 0}, line: 8}
+             ] ==
                Collector.get_public_functions(module_a)
     end
 
@@ -93,9 +99,9 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions.CollectorTest do
         |> to_source_file("lib/module_a.ex")
 
       assert [
-               {ModuleA.NestedModule, :public_function, 0},
-               {ModuleA, :another_function, 0},
-               {ModuleB, :another_function, 0}
+               {{ModuleA.NestedModule, :public_function, 0}, line: 3},
+               {{ModuleA, :another_function, 0}, line: 8},
+               {{ModuleB, :another_function, 0}, line: 14}
              ] ==
                Collector.get_public_functions(module_a)
     end
@@ -115,7 +121,9 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions.CollectorTest do
 
       function_calls = []
 
-      assert [{ModuleA, :public_function, 0}] == Collector.collect_unused_functions(module_a, function_calls)
+      assert [
+               {{ModuleA, :public_function, 0}, line: 2}
+             ] == Collector.collect_unused_functions(module_a, function_calls)
     end
 
     test "returns empty unused public functions if there are calls" do
