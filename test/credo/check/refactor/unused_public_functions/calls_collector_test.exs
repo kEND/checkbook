@@ -75,41 +75,45 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions.CallsCollectorTest do
     assert [{String, :downcase, 1}] == CallsCollector.collect_function_calls([source])
   end
 
-  # test "collects delegated function calls" do
-  #   user_processor =
-  #     """
-  #     defmodule UserProcessor do
-  #       def process_user(user), do: :ok
-  #     end
+  test "collects both delegate and target module calls" do
+    source =
+      """
+      defmodule MyModule do
+        defdelegate process_user(user), to: UserProcessor
 
-  #     """
-  #     |> to_source_file()
+        def my_function do
+          process_user("john")  # Should collect both MyModule.process_user/1 and UserProcessor.process_user/1
+        end
+      end
+      """
+      |> to_source_file()
 
-  #   data_transformer =
-  #     """
-  #     defmodule DataTransformer do
-  #       def transform(data, opts), do: :ok
-  #     end
-  #     """
-  #     |> to_source_file()
+    assert [
+             {MyModule, :process_user, 1},
+             {UserProcessor, :process_user, 1}
+           ] == CallsCollector.collect_function_calls([source])
+  end
 
-  #   source =
-  #     """
-  #     defmodule MyModule do
-  #       defdelegate process_user(user), to: UserProcessor
-  #       defdelegate transform(data, opts), to: DataTransformer
+  test "collects both delegate and imported function calls" do
+    source =
+      """
+      defmodule MyModule do
+        import String, only: [downcase: 1]
+        defdelegate process_user(user), to: UserProcessor
 
-  #       defp private_function do
-  #         process_user("user")
-  #       end
-  #     end
-  #     """
-  #     |> to_source_file()
+        def my_function do
+          process_user(downcase("JOHN"))  # Should collect delegate calls and the imported String.downcase
+        end
+      end
+      """
+      |> to_source_file()
 
-  #   assert [
-  #            {UserProcessor, :process_user, 1}
-  #          ] == CallsCollector.collect_function_calls([source, user_processor, data_transformer])
-  # end
+    assert [
+             {MyModule, :process_user, 1},
+             {String, :downcase, 1},
+             {UserProcessor, :process_user, 1}
+           ] == CallsCollector.collect_function_calls([source])
+  end
 
   test "collects function calls from multiple modules in one file" do
     source =
