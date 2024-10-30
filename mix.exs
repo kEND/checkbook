@@ -4,7 +4,7 @@ defmodule Checkbook.MixProject do
   def project do
     [
       app: :checkbook,
-      version: "0.1.0",
+      version: "0.0.1",
       elixir: "~> 1.12",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -15,7 +15,8 @@ defmodule Checkbook.MixProject do
 
   defp deps do
     [
-      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
+      {:credo, "~> 1.7", runtime: true},
+      {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
     ]
   end
 
