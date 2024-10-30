@@ -121,6 +121,38 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions.CollectorTest do
     end
   end
 
+  test "should iterate over Enum.each wrapping a def unquote" do
+    module_a =
+      """
+      defmodule ModuleA do
+        def public_function do
+          :ok
+        end
+
+        Enum.each(["service_1", "service_2"], fn service ->
+          def unquote(:"with_valid_\#{service}_authentication_header")(%{conn: conn}) do
+            service = unquote(service)
+            username = "username_\#{service}"
+            password = "password_\#{service}"
+
+            conn_with_auth =
+              conn
+              |> Plug.Conn.put_req_header("authorization", "Basic " <> Base.encode64("\#{username}:\#{password}"))
+
+            %{conn_with_auth: conn_with_auth}
+          end
+        end)
+      end
+      """
+      |> to_source_file("lib/module_a.ex")
+
+    assert [
+             {{ModuleA, :public_function, 0}, line: 2},
+             {{ModuleA, :with_valid_service_1_authentication_header, 1}, line: 6},
+             {{ModuleA, :with_valid_service_2_authentication_header, 1}, line: 6}
+           ] == Collector.get_public_functions(module_a)
+  end
+
   describe "collect_unused_functions/2" do
     test "returns unused public functions if there are no calls" do
       module_a =
