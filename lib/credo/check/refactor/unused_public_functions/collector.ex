@@ -43,17 +43,31 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions.Collector do
     {node, {stack, [function_tuple | fns]}}
   end
 
-  # Handle public function definitions
-  defp pre_traverse({:def, meta, [{name, _, args} | _]} = node, {[current_module | _] = stack, fns}) do
+  # Handle Enum.each specifically with def unquote
+  defp pre_traverse(
+         {{:., _, [{:__aliases__, _, [:Enum]}, :each]}, meta,
+          [
+            enum_items,
+            {:fn, _, [{:->, _, [_params, {:def, _def_meta, [{{:unquote, _, _}, _, _} = unquote_expr | _] = def_args}]}]}
+          ]} = node,
+         {[current_module | _] = stack, fns}
+       )
+       when is_list(enum_items) do
+    new_fns = create_dynamic_functions(enum_items, unquote_expr, def_args, current_module, meta[:line])
+    {node, {stack, new_fns ++ fns}}
+  end
+
+  # Handle regular public function definitions (skip if it contains unquote)
+  defp pre_traverse({:def, meta, [{name, _, args} | _]} = node, {[current_module | _] = stack, fns})
+       when not is_tuple(name) do
     arity = if is_list(args), do: length(args), else: 0
     function_tuple = {{current_module, name, arity}, line: meta[:line]}
     {node, {stack, [function_tuple | fns]}}
   end
 
-  # Skip private functions
-  defp pre_traverse({:defp, _, _} = node, acc) do
-    {node, acc}
-  end
+  # Skip private functions and other def with unquote
+  defp pre_traverse({:def, _, [{:unquote, _, _} | _]} = node, acc), do: {node, acc}
+  defp pre_traverse({:defp, _, _} = node, acc), do: {node, acc}
 
   # Default case for pre_traverse
   defp pre_traverse(node, acc) do
@@ -69,4 +83,39 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions.Collector do
   defp post_traverse(_node, acc) do
     {[], acc}
   end
+
+  defp create_dynamic_functions(enum_items, unquote_expr, def_args, current_module, line_no) do
+    arity = count_args_from_pattern(def_args)
+
+    enum_items
+    |> Enum.reverse()
+    |> Enum.map(fn item ->
+      # Extract the string parts and interpolation from the function name
+      function_name =
+        case unquote_expr do
+          {{:unquote, _,
+            [
+              {{:., _, [:erlang, :binary_to_atom]}, _,
+               [
+                 {:<<>>, _, parts},
+                 :utf8
+               ]}
+            ]}, _, _} ->
+            # Resolve the interpolated string
+            parts
+            |> Enum.map(fn
+              string when is_binary(string) -> string
+              {:"::", _, [{{:., _, _}, _, [_var]}, _]} -> item
+            end)
+            |> Enum.join()
+            |> String.to_atom()
+        end
+
+      {{current_module, function_name, arity}, line: line_no}
+    end)
+  end
+
+  defp count_args_from_pattern([{_, _, [args | _]} | _]) when is_map(args), do: 1
+  defp count_args_from_pattern([{_, _, args} | _]) when is_list(args), do: length(args)
+  defp count_args_from_pattern(_), do: 0
 end
