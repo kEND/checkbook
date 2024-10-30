@@ -53,7 +53,7 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctionsTest do
       |> run_check(UnusedPublicFunctions)
       |> assert_issue(fn issue ->
         assert issue.filename == "lib/module_a.ex"
-        assert issue.message =~ "ModuleA.private_function/0"
+        assert issue.message =~ "ModuleA.public_function/0 is unused"
       end)
     end
   end
