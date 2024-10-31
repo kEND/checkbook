@@ -162,6 +162,32 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions.CallsCollectorTest do
            ] == CallsCollector.collect_function_calls([source])
   end
 
+  test "collects function calls in unquoted expressions within a quoted expression" do
+    myapp_web =
+      """
+      defmodule MyAppWeb do
+
+        def controller do
+          quote do
+            use Phoenix.Controller, namespace: MyAppWeb
+
+            import Plug.Conn
+            import ClarusWeb.Gettext
+            import Clarus.Schema, only: [cast_and_apply: 2, cast_and_apply: 3]
+            alias ClarusWeb.Router.Helpers, as: Routes
+
+            unquote(verified_routes())
+          end
+        end
+      end
+      """
+      |> to_source_file("lib/myapp_web.ex")
+
+    assert [
+             {MyAppWeb, :verified_routes, 0}
+           ] == CallsCollector.collect_function_calls([myapp_web])
+  end
+
   test "collects function calls from modules that use MyAppWeb, :some_function" do
     module_a =
       """

@@ -18,6 +18,11 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions.CallsCollector do
 
     {_, calls} =
       Macro.prewalk(ast, [], fn
+        # Handle unquote calls within quote blocks
+        {:unquote, _meta, [{function, _, args}]} = node, acc when is_atom(function) ->
+          arity = if is_list(args), do: length(args), else: 0
+          {node, [{current_module, function, arity} | acc]}
+
         # Handle use Module, :function pattern
         {:use, _meta, [{:__aliases__, _, module_parts}, function]} = node, acc when is_atom(function) ->
           module = resolve_module(module_parts, aliases)
