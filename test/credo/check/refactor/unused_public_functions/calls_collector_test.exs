@@ -205,4 +205,49 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions.CallsCollectorTest do
              {MyAppWeb, :controller, 0}
            ] == CallsCollector.collect_function_calls([module_a])
   end
+
+  test "collects function calls through dynamic module resolution in behaviours" do
+    source_files =
+      [
+        "test/fixtures/service/service.ex",
+        "test/fixtures/service/client.ex",
+        "test/fixtures/service/sandbox_client.ex"
+      ]
+      |> Enum.map(&File.read!/1)
+      |> Enum.map(&to_source_file/1)
+
+    function_calls = CallsCollector.collect_function_calls(source_files)
+
+    # should include calls to the Service behaviour
+    assert Enum.member?(
+             function_calls,
+             {MyApp.ExternalServices.Service, :send_reminder_email, 2}
+           )
+
+    assert Enum.member?(
+             function_calls,
+             {MyApp.ExternalServices.Service, :send_submit_request, 2}
+           )
+
+    # Should include calls to both implementations through api_client()
+    assert Enum.member?(
+             function_calls,
+             {MyApp.ExternalServices.Service.Client, :send_reminder_email, 2}
+           )
+
+    assert Enum.member?(
+             function_calls,
+             {MyApp.ExternalServices.Service.SandboxClient, :send_reminder_email, 2}
+           )
+
+    assert Enum.member?(
+             function_calls,
+             {MyApp.ExternalServices.Service.Client, :send_submit_request, 2}
+           )
+
+    assert Enum.member?(
+             function_calls,
+             {MyApp.ExternalServices.Service.SandboxClient, :send_submit_request, 2}
+           )
+  end
 end
