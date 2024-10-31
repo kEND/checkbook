@@ -119,38 +119,80 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions.CollectorTest do
                {{ModuleA, :process_user, 1}, line: 2}
              ] == Collector.get_public_functions(module_a)
     end
-  end
 
-  test "should iterate over Enum.each wrapping a def unquote" do
-    module_a =
-      """
-      defmodule ModuleA do
-        def public_function do
-          :ok
-        end
-
-        Enum.each(["service_1", "service_2"], fn service ->
-          def unquote(:"with_valid_\#{service}_authentication_header")(%{conn: conn}) do
-            service = unquote(service)
-            username = "username_\#{service}"
-            password = "password_\#{service}"
-
-            conn_with_auth =
-              conn
-              |> Plug.Conn.put_req_header("authorization", "Basic " <> Base.encode64("\#{username}:\#{password}"))
-
-            %{conn_with_auth: conn_with_auth}
+    test "should iterate over Enum.each wrapping a def unquote" do
+      module_a =
+        """
+        defmodule ModuleA do
+          def public_function do
+            :ok
           end
-        end)
-      end
-      """
-      |> to_source_file("lib/module_a.ex")
 
-    assert [
-             {{ModuleA, :public_function, 0}, line: 2},
-             {{ModuleA, :with_valid_service_1_authentication_header, 1}, line: 6},
-             {{ModuleA, :with_valid_service_2_authentication_header, 1}, line: 6}
-           ] == Collector.get_public_functions(module_a)
+          Enum.each(["service_1", "service_2"], fn service ->
+            def unquote(:"with_valid_\#{service}_authentication_header")(%{conn: conn}) do
+              service = unquote(service)
+              username = "username_\#{service}"
+              password = "password_\#{service}"
+
+              conn_with_auth =
+                conn
+                |> Plug.Conn.put_req_header("authorization", "Basic " <> Base.encode64("\#{username}:\#{password}"))
+
+              %{conn_with_auth: conn_with_auth}
+            end
+          end)
+        end
+        """
+        |> to_source_file("lib/module_a.ex")
+
+      assert [
+               {{ModuleA, :public_function, 0}, line: 2},
+               {{ModuleA, :with_valid_service_1_authentication_header, 1}, line: 6},
+               {{ModuleA, :with_valid_service_2_authentication_header, 1}, line: 6}
+             ] == Collector.get_public_functions(module_a)
+    end
+
+    test "considers calls that will be used with `use` as public functions" do
+      myapp_web =
+        """
+        defmodule MyAppWeb do
+
+          def controller do
+            quote do
+              use Phoenix.Controller, namespace: MyAppWeb
+
+              import Plug.Conn
+              import ClarusWeb.Gettext
+              import Clarus.Schema, only: [cast_and_apply: 2, cast_and_apply: 3]
+              alias ClarusWeb.Router.Helpers, as: Routes
+
+              unquote(verified_routes())
+            end
+          end
+        end
+        """
+        |> to_source_file("lib/myapp_web.ex")
+
+      assert [
+               {{MyAppWeb, :controller, 0}, line: 3}
+             ] == Collector.get_public_functions(myapp_web)
+
+      module_a =
+        """
+        defmodule ModuleA do
+          use MyAppWeb, :controller
+
+          def some_public_function do
+            :ok
+          end
+        end
+        """
+        |> to_source_file("lib/module_a.ex")
+
+      assert [
+               {{ModuleA, :some_public_function, 0}, line: 4}
+             ] == Collector.get_public_functions(module_a)
+    end
   end
 
   describe "collect_unused_functions/2" do
