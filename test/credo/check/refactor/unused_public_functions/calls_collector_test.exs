@@ -161,4 +161,22 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions.CallsCollectorTest do
              {MyApp.Services.UserService, :create, 0}
            ] == CallsCollector.collect_function_calls([source])
   end
+
+  test "collects function calls from modules that use MyAppWeb, :some_function" do
+    module_a =
+      """
+      defmodule ModuleA do
+        use MyAppWeb, :controller
+
+        def some_public_function do
+          :ok
+        end
+      end
+      """
+      |> to_source_file("lib/module_a.ex")
+
+    assert [
+             {MyAppWeb, :controller, 0}
+           ] == CallsCollector.collect_function_calls([module_a])
+  end
 end
