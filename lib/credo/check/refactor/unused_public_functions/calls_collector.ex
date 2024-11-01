@@ -1,4 +1,8 @@
 defmodule Credo.Check.Refactor.UnusedPublicFunctions.CallsCollector do
+  alias Credo.Check.Refactor.UnusedPublicFunctions.BehaviourMapper
+
+  import Credo.Check.Refactor.UnusedPublicFunctions.ModuleHelper
+
   @moduledoc """
   Collects all function calls from all source files.
 
@@ -6,18 +10,54 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions.CallsCollector do
   """
 
   def collect_function_calls(source_files) do
-    Enum.flat_map(source_files, &get_function_calls/1)
+    # Get behaviour mappings
+    {behaviours, implementations} = BehaviourMapper.map_behaviours(source_files)
+
+    # Collect calls with behaviour context
+    source_files
+    |> Enum.flat_map(&get_function_calls(&1, behaviours, implementations))
     |> MapSet.new()
     |> MapSet.to_list()
   end
 
-  defp get_function_calls(source_file) do
+  defp get_function_calls(source_file, behaviours, implementations) do
     ast = Credo.SourceFile.ast(source_file)
-
     {aliases, imports, delegates, current_module} = extract_module_context(ast)
 
     {_, calls} =
       Macro.prewalk(ast, [], fn
+        # Match dynamic function calls: api_client().send_submit_request(args)
+        {{:., _, [{fn1, _, []}, fn2]}, _, args} = node, acc
+        when is_atom(fn1) and is_atom(fn2) ->
+          # If current_module is a behaviour, add calls for all implementations
+          new_calls =
+            if MapSet.member?(behaviours, current_module) do
+              # Get all implementations of this behaviour
+              implementations_of_current =
+                implementations
+                |> Enum.filter(fn {_impl, behaviour} -> behaviour == current_module end)
+                |> Enum.map(fn {impl, _} -> impl end)
+
+              # Create calls for both the defining module and all implementations
+              [current_module | implementations_of_current]
+              |> Enum.map(fn module -> {module, fn2, length(args)} end)
+            else
+              # If not a behaviour, just record the call for current module
+              [{current_module, fn2, length(args)}]
+            end
+
+          {node, new_calls ++ acc}
+
+        # Handle unquote calls within quote blocks
+        {:unquote, _meta, [{function, _, args}]} = node, acc when is_atom(function) ->
+          arity = if is_list(args), do: length(args), else: 0
+          {node, [{current_module, function, arity} | acc]}
+
+        # Handle use Module, :function pattern
+        {:use, _meta, [{:__aliases__, _, module_parts}, function]} = node, acc when is_atom(function) ->
+          module = resolve_module(module_parts, aliases)
+          {node, [{module, function, 0} | acc]}
+
         # Skip the {} operator calls
         {{:., _, [_, :{}]}, _, _} = node, acc ->
           {node, acc}
@@ -142,30 +182,6 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions.CallsCollector do
     case Map.get(imports, {function, arity}) do
       nil -> nil
       module -> {module, function, arity}
-    end
-  end
-
-  defp safe_module_concat(parts) do
-    parts
-    |> Enum.map(fn
-      {:__MODULE__, _, _} -> "__MODULE__"
-      part when is_atom(part) -> Atom.to_string(part)
-      part when is_binary(part) -> part
-    end)
-    |> Enum.reject(&(&1 == "__MODULE__"))
-    |> Module.concat()
-  end
-
-  defp resolve_module(module_parts, aliases) do
-    case module_parts do
-      [head | tail] ->
-        case Map.get(aliases, head) do
-          nil -> safe_module_concat(module_parts)
-          base_module -> safe_module_concat([base_module | tail])
-        end
-
-      _ ->
-        safe_module_concat(module_parts)
     end
   end
 end
