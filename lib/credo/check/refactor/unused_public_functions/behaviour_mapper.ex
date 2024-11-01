@@ -3,6 +3,8 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions.BehaviourMapper do
   Maps relationships between behaviour-defining modules and their implementations.
   """
 
+  import Credo.Check.Refactor.UnusedPublicFunctions.ModuleHelper
+
   @type behaviour_module :: module()
   @type implementation_module :: module()
   @type implementation_tuple :: {implementation_module(), behaviour_module()}
@@ -17,13 +19,13 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions.BehaviourMapper do
         Macro.prewalk(ast, {nil, %{}, behaviours, implementations}, fn
           # Track module definition
           {:defmodule, _, [{:__aliases__, _, module_parts} | _]} = node, {_, aliases, behs, impls} ->
-            current_module = Module.concat(module_parts)
+            current_module = safe_module_concat(module_parts)
             {node, {current_module, aliases, behs, impls}}
 
-          # Track basic alias statements
+          # Track alias statements
           {:alias, _, [{:__aliases__, _, module_parts}]} = node, {current_module, aliases, behs, impls} ->
-            full_module = Module.concat(module_parts)
-            short_name = Module.concat([List.last(module_parts)])
+            full_module = safe_module_concat(module_parts)
+            short_name = List.last(module_parts)
             new_aliases = Map.put(aliases, short_name, full_module)
             {node, {current_module, new_aliases, behs, impls}}
 
@@ -31,12 +33,9 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions.BehaviourMapper do
           {:@, _, [{:callback, _, _}]} = node, {current_module, aliases, behs, impls} ->
             {node, {current_module, aliases, MapSet.put(behs, current_module), impls}}
 
-          # Track modules that implement behaviours (fully qualified)
+          # Track modules that implement behaviours
           {:@, _, [{:behaviour, _, [{:__aliases__, _, module_parts}]}]} = node, {current_module, aliases, behs, impls} ->
-            # First try to resolve as a short name from aliases
-            short_name = Module.concat([List.last(module_parts)])
-            behaviour_module = Map.get(aliases, short_name) || Module.concat(module_parts)
-
+            behaviour_module = resolve_module(module_parts, aliases)
             implementation = {current_module, behaviour_module}
             {node, {current_module, aliases, behs, MapSet.put(impls, implementation)}}
 
