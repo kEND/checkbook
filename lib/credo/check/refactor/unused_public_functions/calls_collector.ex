@@ -25,79 +25,133 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions.CallsCollector do
     {aliases, imports, delegates, current_module} = extract_module_context(ast)
 
     {_, calls} =
-      Macro.prewalk(ast, [], fn
-        # Match dynamic function calls: api_client().send_submit_request(args)
-        {{:., _, [{fn1, _, []}, fn2]}, _, args} = node, acc
-        when is_atom(fn1) and is_atom(fn2) ->
-          # If current_module is a behaviour, add calls for all implementations
-          new_calls =
-            if MapSet.member?(behaviours, current_module) do
-              # Get all implementations of this behaviour
-              implementations_of_current =
-                implementations
-                |> Enum.filter(fn {_impl, behaviour} -> behaviour == current_module end)
-                |> Enum.map(fn {impl, _} -> impl end)
+      Macro.traverse(ast, [],
+        fn
+          # Skip the {} operator calls from multiple aliases
+          {{:., _, [_, :{}]}, _, _} = node, acc ->
+            {node, acc}
 
-              # Create calls for both the defining module and all implementations
-              [current_module | implementations_of_current]
-              |> Enum.map(fn module -> {module, fn2, length(args)} end)
-            else
-              # If not a behaviour, just record the call for current module
-              [{current_module, fn2, length(args)}]
+          # Collect piped function calls with correct arity
+          {:|>, _, [_, {{:., _, [{:__aliases__, _, module_parts}, function]}, _, args}]} = node, acc ->
+            module = resolve_module(module_parts, aliases)
+            {node, [{module, function, length(args) + 1} | acc]}
+
+          # Skip all other nodes in pre-traversal
+          node, acc ->
+            {node, acc}
+        end,
+        fn node, acc ->
+          {node, acc}
+        end)
+
+    # Now collect all non-piped function calls
+    {_, non_piped_calls} =
+      Macro.traverse(ast, [],
+        fn
+          # Skip the {} operator calls from multiple aliases
+          {{:., _, [_, :{}]}, _, _} = node, acc ->
+            {node, acc}
+
+          # Skip if parent is a pipe
+          {{:., _, [{:__aliases__, _, _}, _]}, _, _} = node, acc ->
+            parent = get_parent(ast, node)
+            case parent do
+              {:|>, _, [_, _]} -> {node, acc}
+              _ ->
+                case node do
+                  {{:., _, [{:__aliases__, _, module_parts}, function]}, _, args} ->
+                    module = resolve_module(module_parts, aliases)
+                    {node, [{module, function, length(args)} | acc]}
+                  _ -> {node, acc}
+                end
             end
 
-          {node, new_calls ++ acc}
+          # Match dynamic function calls: api_client().send_submit_request(args)
+          {{:., _, [{fn1, _, []}, fn2]}, _, args} = node, acc
+          when is_atom(fn1) and is_atom(fn2) ->
+            new_calls =
+              if MapSet.member?(behaviours, current_module) do
+                implementations_of_current =
+                  implementations
+                  |> Enum.filter(fn {_impl, behaviour} -> behaviour == current_module end)
+                  |> Enum.map(fn {impl, _} -> impl end)
 
-        # Handle unquote calls within quote blocks
-        {:unquote, _meta, [{function, _, args}]} = node, acc when is_atom(function) ->
-          arity = if is_list(args), do: length(args), else: 0
-          {node, [{current_module, function, arity} | acc]}
-
-        # Handle use Module, :function pattern
-        {:use, _meta, [{:__aliases__, _, module_parts}, function]} = node, acc when is_atom(function) ->
-          module = resolve_module(module_parts, aliases)
-          {node, [{module, function, 0} | acc]}
-
-        # Skip the {} operator calls
-        {{:., _, [_, :{}]}, _, _} = node, acc ->
-          {node, acc}
-
-        # Handle direct module calls
-        {{:., _, [{:__aliases__, _, module_parts}, function]}, _, args} = node, acc ->
-          module = resolve_module(module_parts, aliases)
-          {node, [{module, function, length(args)} | acc]}
-
-        # Handle potential delegated or imported function calls
-        {function, _, args} = node, acc when is_atom(function) and is_list(args) ->
-          arity = length(args)
-
-          cond do
-            # Check if this is a delegated function call
-            delegate = Map.get(delegates, {function, arity}) ->
-              case delegate do
-                {target_mod, _fun, _arity} ->
-                  # Add both the local call and the delegated call
-                  local_call = {current_module, function, arity}
-                  delegated_call = {target_mod, function, arity}
-                  {node, [delegated_call, local_call | acc]}
-
-                nil ->
-                  {node, acc}
+                [current_module | implementations_of_current]
+                |> Enum.map(fn module -> {module, fn2, length(args)} end)
+              else
+                [{current_module, fn2, length(args)}]
               end
+            {node, new_calls ++ acc}
 
-            # Check imports
-            import_result = resolve_import(function, arity, imports) ->
-              {node, [import_result | acc]}
+          # Handle unquote calls within quote blocks
+          {:unquote, _meta, [{function, _, args}]} = node, acc when is_atom(function) ->
+            arity = if is_list(args), do: length(args), else: 0
+            {node, [{current_module, function, arity} | acc]}
 
-            true ->
-              {node, acc}
-          end
+          # Handle use Module, :function pattern
+          {:use, _meta, [{:__aliases__, _, module_parts}, function]} = node, acc when is_atom(function) ->
+            module = resolve_module(module_parts, aliases)
+            {node, [{module, function, 0} | acc]}
 
-        node, acc ->
-          {node, acc}
-      end)
+          # Handle direct module calls
+          {{:., _, [{:__aliases__, _, module_parts}, function]}, _, args} = node, acc ->
+            module = resolve_module(module_parts, aliases)
+            {node, [{module, function, length(args)} | acc]}
 
-    Enum.sort_by(calls, fn {module, function, _arity} -> {Kernel.to_string(module), Kernel.to_string(function)} end)
+          # Handle potential delegated or imported function calls
+          {function, _, args} = node, acc when is_atom(function) and is_list(args) ->
+            arity = length(args)
+
+            cond do
+              # Check if this is a delegated function call
+              delegate = Map.get(delegates, {function, arity}) ->
+                case delegate do
+                  {target_mod, _fun, _arity} ->
+                    # Add both the local call and the delegated call
+                    local_call = {current_module, function, arity}
+                    delegated_call = {target_mod, function, arity}
+                    {node, [delegated_call, local_call | acc]}
+
+                  nil ->
+                    {node, acc}
+                end
+
+              # Check imports
+              import_result = resolve_import(function, arity, imports) ->
+                {node, [import_result | acc]}
+
+              true ->
+                {node, acc}
+            end
+
+          node, acc ->
+            {node, acc}
+        end,
+        fn node, acc -> {node, acc} end)
+
+    (calls ++ non_piped_calls)
+    |> Enum.sort_by(fn {module, function, _arity} -> {Kernel.to_string(module), Kernel.to_string(function)} end)
+  end
+
+  # Helper function to find parent node
+  defp get_parent(ast, target) do
+    {_, parent} =
+      Macro.traverse(ast, nil,
+        fn
+          node, nil ->
+            children = case node do
+              {_, _, args} when is_list(args) -> args
+              _ -> []
+            end
+            if target in List.wrap(children) do
+              {node, node}
+            else
+              {node, nil}
+            end
+          node, acc -> {node, acc}
+        end,
+        fn node, acc -> {node, acc} end)
+    parent
   end
 
   defp extract_module_context(ast) do

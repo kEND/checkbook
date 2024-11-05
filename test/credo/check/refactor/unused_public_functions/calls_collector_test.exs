@@ -250,4 +250,51 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions.CallsCollectorTest do
              {MyApp.ExternalServices.Service.SandboxClient, :send_submit_request, 2}
            )
   end
+
+  test "collect function calls from piping" do
+    source_file =
+      """
+      defmodule MyModule do
+        def my_function do
+          "hello" |> String.downcase()
+        end
+      end
+      """
+      |> to_source_file()
+
+    assert [{String, :downcase, 1}] == CallsCollector.collect_function_calls([source_file])
+  end
+
+  test "collect function calls from pipes with multiple arguments" do
+    source_file =
+      """
+      defmodule MyModule do
+        def my_function do
+          "hello" |> String.pad_trailing(10, ".")
+        end
+      end
+      """
+      |> to_source_file()
+
+    assert [{String, :pad_trailing, 3}] == CallsCollector.collect_function_calls([source_file])
+  end
+
+  test "collect function calls from nested pipes" do
+    source_file =
+      """
+      defmodule MyModule do
+        def my_function do
+          "hello"
+          |> String.upcase()
+          |> (fn x -> String.slice(x, 0, 2) end).()
+        end
+      end
+      """
+      |> to_source_file()
+
+    assert [
+             {String, :slice, 3},
+             {String, :upcase, 1}
+           ] == CallsCollector.collect_function_calls([source_file]) |> Enum.sort()
+  end
 end
