@@ -3,6 +3,10 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions do
     run_on_all: true,
     category: :refactor,
     base_priority: :high,
+    param_defaults: [
+      files_to_scan: ["lib/", "test/"],
+      files_to_analyze: ["lib/", "test/"]
+    ],
     explanations: [
       check: """
       Public functions that are never called should be considered for removal.
@@ -35,11 +39,18 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions do
 
   @impl true
   def run_on_all_source_files(exec, source_files, params) do
+    files_to_scan = Params.get(params, :files_to_scan, __MODULE__)
+    files_to_analyze = Params.get(params, :files_to_analyze, __MODULE__)
+
     # Collect all function calls in the codebase
-    function_calls = CallsCollector.collect_function_calls(source_files)
+    function_calls =
+      source_files
+      |> filter_files(files_to_scan)
+      |> CallsCollector.collect_function_calls()
 
     # Process each source file
     source_files
+    |> filter_files(files_to_analyze)
     |> Task.async_stream(
       fn source_file ->
         issues =
@@ -63,5 +74,13 @@ defmodule Credo.Check.Refactor.UnusedPublicFunctions do
     |> Stream.run()
 
     :ok
+  end
+
+  defp filter_files(source_files, nil), do: source_files
+
+  defp filter_files(source_files, file_patterns) do
+    Enum.filter(source_files, fn source_file ->
+      Enum.any?(file_patterns, fn prefix -> String.starts_with?(source_file.filename, prefix) end)
+    end)
   end
 end
